@@ -14,7 +14,7 @@ Requires PHP `8.1` or higher.
 Install with composer:
 
 ```shell
-composer require composite/container
+composer require composite-php/container
 ```
 
 ## Usage
