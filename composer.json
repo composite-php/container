@@ -1,5 +1,5 @@
 {
-    "name": "composite/container",
+    "name": "composite-php/container",
     "description": "A PSR-11 implementation with auto-wiring.",
     "keywords": ["PSR-11", "autowiring"],
     "type": "library",
