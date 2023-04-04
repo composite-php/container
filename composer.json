@@ -1,0 +1,37 @@
+{
+    "name": "composite/container",
+    "description": "A PSR-11 implementation with auto-wiring.",
+    "keywords": ["PSR-11", "autowiring"],
+    "type": "library",
+    "license": "MIT",
+    "minimum-stability": "stable",
+    "require": {
+        "psr/container": "^2"
+    },
+    "require-dev": {
+        "squizlabs/php_codesniffer": "^3.6",
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Composite\\Container\\": "src"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Composite\\Container\\Tests\\": "tests"
+        }
+    },
+    "scripts": {
+        "test": [
+            "@composer validate",
+            "phpcs",
+            "phpunit --do-not-cache-result --testdox"
+        ],
+        "csfix": "phpcbf"
+    },
+    "scripts-descriptions": {
+        "test": "Runs all checks; should be executed before committing.",
+        "csfix": "Fixes code style errors automatically wiht PHPCBF."
+    }
+}
