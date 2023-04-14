@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 namespace Composite\Container;
 
+use Closure;
 use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
 use ReflectionClass;
-use ReflectionException;
 use ReflectionMethod;
 use ReflectionNamedType;
+use ReflectionParameter;
 use ReflectionUnionType;
 use Throwable;
 
@@ -33,35 +34,38 @@ class Container implements ContainerInterface
     /**
      * This property acts as container for resolved entries,
      * so they don't have to be resolved again.
-     * @var array<string>
+     *
+     * @var array<string, mixed>
      */
     private array $resolved = [];
 
     /**
-     * @var array<string>
+     * @var array<string, mixed>
      */
     private array $beingResolved = [];
 
     /**
      * @param iterable<string, callable> $definitions
+     *
      * @throws ContainerException In case one of given definitions is invalid.
      */
     public function __construct(iterable $definitions = [])
     {
         foreach ($definitions as $id => $definition) {
-            try {
-                $this->userDefinitions[$id] = $definition(...);
-            } catch (Throwable $exception) {
-                $msg = sprintf('Invalid definition for %s.', $id);
-                throw new ContainerException($msg, 0, $exception);
+            if (!$definition instanceof Closure) {
+                throw new ContainerException("Invalid definition for {$id}.");
             }
+
+            $this->userDefinitions[$id] = $definition(...);
         }
     }
 
     /**
      * @template T
+     *
      * @param string|class-string<T> $id Entry name or a class name.
-     * @return mixed|T
+     *
+     * @return ($id is class-string ? T : mixed)
      * @throws NotFoundExceptionInterface
      * @throws ContainerExceptionInterface
      */
@@ -106,6 +110,7 @@ class Container implements ContainerInterface
 
     /**
      * @param class-string $qn
+     *
      * @return object
      * @throws ContainerException
      */
@@ -118,12 +123,7 @@ class Container implements ContainerInterface
 
         $this->beingResolved[$qn] = true;
 
-        try {
-            $reflection = new ReflectionClass($qn);
-        } catch (Throwable $exception) {
-            $reason = sprintf('Failed to reflect class %s because it does not exist.', $qn);
-            throw new ContainerException($this->buildExceptionReport($reason), 0, $exception);
-        }
+        $reflection = new ReflectionClass($qn);
 
         if (!$reflection->isInstantiable()) {
             $reason = sprintf('%s is not instantiable.', $qn);
@@ -149,7 +149,8 @@ class Container implements ContainerInterface
     /**
      * @param string $qn
      * @param ReflectionMethod $constructor
-     * @return iterable
+     *
+     * @return iterable<int, mixed>
      * @throws ContainerException
      * @throws ContainerExceptionInterface
      * @throws NotFoundExceptionInterface
@@ -161,50 +162,38 @@ class Container implements ContainerInterface
                 yield $param->getDefaultValue();
                 continue;
             }
+
             $paramType = $param->getType();
+
             if ($paramType instanceof ReflectionUnionType) {
-                $msgFormat = 'Unable to resolve %s constructor parameter $%s (position %d): it has union type %s.';
-                $types = [];
-                foreach ($paramType->getTypes() as $namedType) {
-                    $types[] = $namedType->getName();
-                }
-                $message = sprintf(
-                    $msgFormat,
-                    $qn,
-                    $param->getName(),
-                    $param->getPosition() + 1,
-                    implode('|', $types)
-                );
-                throw new ContainerException($this->buildExceptionReport($message));
+                $this->throwNonResolvableUnionParameterTypeException($qn, $param);
             }
 
-            try {
-                /** @var ReflectionNamedType $paramType */
-                $paramClass = !$paramType || $paramType->isBuiltin()
-                    ? null
-                    : new ReflectionClass($paramType->getName());
-            } catch (ReflectionException $e) {
-                $msg = sprintf(
-                    'Unable to resolve %s constructor parameter $%s: %s.',
-                    $qn,
-                    $param->getName(),
-                    $e->getMessage()
-                );
-                throw new ContainerException($this->buildExceptionReport($msg), 0, $e);
+            if ($paramType === null) {
+                $this->throwNonResolvableParameterTypeException($qn, $param, 'null provided as parameter type');
             }
 
-            if (!$paramClass) {
+            assert($paramType instanceof ReflectionNamedType);
+
+            if ($paramType->isBuiltin()) {
+                $this->throwNonResolvableParameterTypeException($qn, $param, 'a built-in type provided');
+            }
+
+            $typeHintedClassName = $paramType->getName();
+
+            if (!class_exists($typeHintedClassName)) {
                 $msg = sprintf(
-                    'Unable to resolve %s constructor parameter $%s of type %s (position %d).',
+                    'Unable to resolve %s constructor parameter $%s of type %s (position %d):
+                         The type-hinted class for the type does not exist.',
                     $qn,
                     $param->getName(),
                     $param->getType() ? (string) $param->getType() : 'unknown',
-                    $param->getPosition() + 1
+                    $param->getPosition() + 1,
                 );
                 throw new ContainerException($this->buildExceptionReport($msg));
             }
 
-            $className = $paramClass->getName();
+            $className = (new ReflectionClass($typeHintedClassName))->getName();
 
             yield $this->get($className);
 
@@ -216,7 +205,9 @@ class Container implements ContainerInterface
      * Since dependency resolution is recursive, it's
      * important to provide developer with information about
      * where exactly in resolution stack the problem occurred.
+     *
      * @param string $reason Exact reason for exception.
+     *
      * @return string
      */
     private function buildExceptionReport(string $reason): string
@@ -227,5 +218,50 @@ class Container implements ContainerInterface
         }
 
         return $report . $reason;
+    }
+
+    private function throwNonResolvableParameterTypeException(
+        string $qn,
+        ReflectionParameter $param,
+        ?string $reason = null,
+    ): void {
+        $msg = sprintf(
+            'Unable to resolve %s constructor parameter $%s of type %s (position %d).',
+            $qn,
+            $param->getName(),
+            $param->getType() ? (string) $param->getType() : 'unknown',
+            $param->getPosition() + 1,
+        );
+
+        if ($reason !== null) {
+            $msg .= " Reason: $reason";
+        }
+
+        throw new ContainerException($this->buildExceptionReport($msg));
+    }
+
+    private function throwNonResolvableUnionParameterTypeException(
+        string $qn,
+        ReflectionParameter $param,
+    ): void {
+        $msgFormat = 'Unable to resolve %s constructor parameter $%s (position %d): it has union type %s.';
+        $types = [];
+        $paramType = $param->getType();
+
+        assert($paramType instanceof ReflectionUnionType);
+
+        foreach ($paramType->getTypes() as $namedType) {
+            $types[] = $namedType->getName();
+        }
+
+        $message = sprintf(
+            $msgFormat,
+            $qn,
+            $param->getName(),
+            $param->getPosition() + 1,
+            implode('|', $types),
+        );
+
+        throw new ContainerException($this->buildExceptionReport($message));
     }
 }
