@@ -82,7 +82,7 @@ The container is capable of doing it on its own:
 ```php
 <?php
 
-use Traso\Container\Container;
+use Composite\Container\Container;
 
 $container = new Container();
 // Ask the container to get instance of UserRegistrationService.
@@ -166,7 +166,7 @@ so, be careful when writing stateful code:
 ```php
 <?php
 
-use Traso\Container\Container;
+use Composite\Container\Container;
 
 $container = new Container();
 // Resolve your service from the container.
@@ -208,7 +208,7 @@ Each definition must be a callable identified by the entry ID. The simplest case
 ```php
 <?php
 
-use Traso\Container\Container;
+use Composite\Container\Container;
 
 // Define that whenever an instance of LoggerInterface is required,
 // the container should return instance of FileLogger.
@@ -218,7 +218,7 @@ $definitions = [
     }
 ];
 // Create container instance, passing the definitions.
-$container = new Traso\Container\Container($definitions);
+$container = new Composite\Container\Container($definitions);
 
 // Returns instance of FileLogger.
 $hotelsProvider = $container->get(LoggerInterface::class);
@@ -230,7 +230,7 @@ However, any `iterable` is accepted by the constructor. Some may find this notat
 <?php
 
 use Psr\Container\ContainerInterface;
-use Traso\Container\Container;
+use Composite\Container\Container;
 
 $definitions = static function (): iterable {
     yield ContainerInterface::class
@@ -253,7 +253,7 @@ You are not limited to classes/objects only, of course:
 ```php
 <?php
 
-use Traso\Container\Container;
+use Composite\Container\Container;
 
 $definitions = [
     'projectRoot' => static function () {
