@@ -30,17 +30,19 @@ class ContainerTest extends TestCase
     public function testConstructorThrowsOnInvalidDefinition(): void
     {
         $definitions = [
-            'foo' => fn () => 'foo',
+            'foo' => static fn () => 'foo',
             'bar' => null
         ];
         $this->expectExceptionMessage('Invalid definition for bar.');
+
+        /* @phpstan-ignore-next-line */
         new Container($definitions);
     }
 
     public function testHasReturnsTrueWhenDefinitionIsPresent(): void
     {
         $definitions = [
-            'foo' => function () {
+            'foo' => static function () {
             }
         ];
 
