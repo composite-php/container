@@ -12,6 +12,7 @@ use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionParameter;
+use ReflectionType;
 use ReflectionUnionType;
 use Throwable;
 
@@ -165,32 +166,28 @@ class Container implements ContainerInterface
 
             $paramType = $param->getType();
 
-            if ($paramType instanceof ReflectionUnionType) {
-                $this->throwNonResolvableUnionParameterTypeException($qn, $param);
+            if ($paramType === null) {
+                $this->throwNonResolvableParameterTypeException(
+                    $qn,
+                    $param,
+                    reason:'Null provided as parameter type',
+                );
             }
 
-            if ($paramType === null) {
-                $this->throwNonResolvableParameterTypeException($qn, $param, 'null provided as parameter type');
-            }
+            $this->checkForUnionType($qn, $param, $paramType);
 
             assert($paramType instanceof ReflectionNamedType);
 
-            if ($paramType->isBuiltin()) {
-                $this->throwNonResolvableParameterTypeException($qn, $param, 'a built-in type provided');
-            }
+            $this->checkForBuiltinType($qn, $param, $paramType);
 
             $typeHintedClassName = $paramType->getName();
 
             if (!class_exists($typeHintedClassName)) {
-                $msg = sprintf(
-                    'Unable to resolve %s constructor parameter $%s of type %s (position %d):
-                         The type-hinted class for the type does not exist.',
+                $this->throwNonResolvableParameterTypeException(
                     $qn,
-                    $param->getName(),
-                    $param->getType() ? (string) $param->getType() : 'unknown',
-                    $param->getPosition() + 1,
+                    $param,
+                    reason: "The type-hinted class for the type does not exist: $typeHintedClassName",
                 );
-                throw new ContainerException($this->buildExceptionReport($msg));
             }
 
             $className = (new ReflectionClass($typeHintedClassName))->getName();
@@ -198,6 +195,39 @@ class Container implements ContainerInterface
             yield $this->get($className);
 
             unset($this->beingResolved[$className]);
+        }
+    }
+
+    private function checkForUnionType(
+        string $qn,
+        ReflectionParameter $param,
+        ReflectionType $paramType
+    ): void {
+        if ($paramType instanceof ReflectionUnionType) {
+            $typeNames = array_map(
+                static fn(ReflectionNamedType $type): string => $type->getName(),
+                $paramType->getTypes(),
+            );
+
+            $this->throwNonResolvableParameterTypeException(
+                $qn,
+                $param,
+                reason: 'It has union type:' . implode('|', $typeNames),
+            );
+        }
+    }
+
+    private function checkForBuiltinType(
+        string $qn,
+        ReflectionParameter $param,
+        ReflectionNamedType $paramType
+    ): void {
+        if ($paramType->isBuiltin()) {
+            $this->throwNonResolvableParameterTypeException(
+                $qn,
+                $param,
+                reason: 'A built-in type provided',
+            );
         }
     }
 
@@ -224,7 +254,7 @@ class Container implements ContainerInterface
         string $qn,
         ReflectionParameter $param,
         ?string $reason = null,
-    ): void {
+    ): never {
         $msg = sprintf(
             'Unable to resolve %s constructor parameter $%s of type %s (position %d).',
             $qn,
@@ -238,30 +268,5 @@ class Container implements ContainerInterface
         }
 
         throw new ContainerException($this->buildExceptionReport($msg));
-    }
-
-    private function throwNonResolvableUnionParameterTypeException(
-        string $qn,
-        ReflectionParameter $param,
-    ): void {
-        $msgFormat = 'Unable to resolve %s constructor parameter $%s (position %d): it has union type %s.';
-        $types = [];
-        $paramType = $param->getType();
-
-        assert($paramType instanceof ReflectionUnionType);
-
-        foreach ($paramType->getTypes() as $namedType) {
-            $types[] = $namedType->getName();
-        }
-
-        $message = sprintf(
-            $msgFormat,
-            $qn,
-            $param->getName(),
-            $param->getPosition() + 1,
-            implode('|', $types),
-        );
-
-        throw new ContainerException($this->buildExceptionReport($message));
     }
 }
