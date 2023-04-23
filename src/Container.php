@@ -14,7 +14,6 @@ use ReflectionNamedType;
 use ReflectionParameter;
 use ReflectionType;
 use ReflectionUnionType;
-use Throwable;
 
 use function array_key_exists;
 use function array_keys;
@@ -110,45 +109,38 @@ class Container implements ContainerInterface
     }
 
     /**
-     * @param class-string $qn
+     * @param class-string $class
      *
      * @return object
      * @throws ContainerException
      */
-    private function instantiate(string $qn): object
+    private function instantiate(string $class): object
     {
-        if (isset($this->beingResolved[$qn])) {
-            $msg = sprintf('Cyclic dependency of %s.', $qn);
-            throw new ContainerException($this->buildExceptionReport($msg));
+        if (isset($this->beingResolved[$class])) {
+            throw new ContainerException("Cyclic dependency of [$class].");
         }
 
-        $this->beingResolved[$qn] = true;
+        $this->beingResolved[$class] = true;
 
-        $reflection = new ReflectionClass($qn);
+        $reflection = new ReflectionClass($class);
 
         if (!$reflection->isInstantiable()) {
-            $reason = sprintf('%s is not instantiable.', $qn);
-            throw new ContainerException($this->buildExceptionReport($reason));
+            throw new ContainerException("[$class] is not instantiable.");
         }
 
         $constructor = $reflection->getConstructor();
         // No constructor defined or constructor requires no arguments? Just create new instance.
         if (!$constructor || !$constructor->getParameters()) {
-            return new $qn();
+            return new $class();
         }
 
-        try {
-            $instance = new $qn(...$this->resolveParams($qn, $constructor));
-            unset($this->beingResolved[$qn]);
-            return $instance;
-        } catch (Throwable $exception) {
-            $message = sprintf('Failed to instantiate %s.', $qn);
-            throw new ContainerException($message, 0, $exception);
-        }
+        $instance = new $class(...$this->resolveParams($class, $constructor));
+        unset($this->beingResolved[$class]);
+        return $instance;
     }
 
     /**
-     * @param string $qn
+     * @param string $class
      * @param ReflectionMethod $constructor
      *
      * @return iterable<int, mixed>
@@ -156,7 +148,7 @@ class Container implements ContainerInterface
      * @throws ContainerExceptionInterface
      * @throws NotFoundExceptionInterface
      */
-    private function resolveParams(string $qn, ReflectionMethod $constructor): iterable
+    private function resolveParams(string $class, ReflectionMethod $constructor): iterable
     {
         foreach ($constructor->getParameters() as $param) {
             if ($param->isOptional() && $param->isDefaultValueAvailable()) {
@@ -167,24 +159,24 @@ class Container implements ContainerInterface
             $paramType = $param->getType();
 
             if ($paramType === null) {
-                $this->throwNonResolvableParameterTypeException(
-                    $qn,
+                $this->throwUnresolvableParameterTypeException(
+                    $class,
                     $param,
-                    reason:'Null provided as parameter type',
+                    reason: 'Null provided as parameter type',
                 );
             }
 
-            $this->checkForUnionType($qn, $param, $paramType);
+            $this->checkForUnionType($class, $param, $paramType);
 
             assert($paramType instanceof ReflectionNamedType);
 
-            $this->checkForBuiltinType($qn, $param, $paramType);
+            $this->checkForScalarTypeWithoutDefaultValue($class, $param, $paramType);
 
             $typeHintedClassName = $paramType->getName();
 
             if (!class_exists($typeHintedClassName)) {
-                $this->throwNonResolvableParameterTypeException(
-                    $qn,
+                $this->throwUnresolvableParameterTypeException(
+                    $class,
                     $param,
                     reason: "The type-hinted class for the type does not exist: $typeHintedClassName",
                 );
@@ -199,7 +191,7 @@ class Container implements ContainerInterface
     }
 
     private function checkForUnionType(
-        string $qn,
+        string $class,
         ReflectionParameter $param,
         ReflectionType $paramType
     ): void {
@@ -209,64 +201,46 @@ class Container implements ContainerInterface
                 $paramType->getTypes(),
             );
 
-            $this->throwNonResolvableParameterTypeException(
-                $qn,
-                $param,
-                reason: 'It has union type:' . implode('|', $typeNames),
+            $message = sprintf(
+                'Unable to resolve %s constructor parameter $%s (position %d). It has union type: [%s]',
+                $class,
+                $param->getName(),
+                $param->getPosition() + 1,
+                implode('|', $typeNames),
             );
+
+            throw new ContainerException($message);
         }
     }
 
-    private function checkForBuiltinType(
-        string $qn,
+    private function checkForScalarTypeWithoutDefaultValue(
+        string $class,
         ReflectionParameter $param,
         ReflectionNamedType $paramType
     ): void {
         if ($paramType->isBuiltin()) {
-            $this->throwNonResolvableParameterTypeException(
-                $qn,
+            $this->throwUnresolvableParameterTypeException(
+                $class,
                 $param,
-                reason: 'A built-in type provided',
+                reason: 'A scalar type without default value provided',
             );
         }
     }
 
-    /**
-     * Since dependency resolution is recursive, it's
-     * important to provide developer with information about
-     * where exactly in resolution stack the problem occurred.
-     *
-     * @param string $reason Exact reason for exception.
-     *
-     * @return string
-     */
-    private function buildExceptionReport(string $reason): string
-    {
-        $report = PHP_EOL;
-        foreach (array_keys($this->beingResolved) as $className) {
-            $report .= 'Resolving ' . $className . '…' . PHP_EOL;
-        }
-
-        return $report . $reason;
-    }
-
-    private function throwNonResolvableParameterTypeException(
-        string $qn,
+    private function throwUnresolvableParameterTypeException(
+        string $class,
         ReflectionParameter $param,
-        ?string $reason = null,
+        string $reason,
     ): never {
         $msg = sprintf(
-            'Unable to resolve %s constructor parameter $%s of type %s (position %d).',
-            $qn,
+            'Unable to resolve %s constructor parameter $%s of type %s (position %d). Reason: %s',
+            $class,
             $param->getName(),
             $param->getType() ? (string) $param->getType() : 'unknown',
             $param->getPosition() + 1,
+            $reason,
         );
 
-        if ($reason !== null) {
-            $msg .= " Reason: $reason";
-        }
-
-        throw new ContainerException($this->buildExceptionReport($msg));
+        throw new ContainerException($msg);
     }
 }
