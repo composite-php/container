@@ -37,9 +37,10 @@ class ContainerTest extends TestCase
     public function testConstructorThrowsOnInvalidDefinition(): void
     {
         $definitions = [
-            'foo' => static fn () => 'foo',
-            'bar' => null
+            'foo' => static fn() => 'foo',
+            'bar' => null,
         ];
+
         $this->expectExceptionMessage('Invalid definition for bar.');
 
         /* @phpstan-ignore-next-line */
@@ -50,10 +51,11 @@ class ContainerTest extends TestCase
     {
         $definitions = [
             'foo' => static function () {
-            }
+            },
         ];
 
         $container = new Container($definitions);
+
         self::assertTrue($container->has('foo'));
     }
 
@@ -67,7 +69,7 @@ class ContainerTest extends TestCase
         self::assertTrue($this->container->has(UserDefinedInterface::class));
     }
 
-    public function testHasReturnsFalseWhenExpected(): void
+    public function testHasReturnsFalseWhenClassDoesNotExist(): void
     {
         self::assertFalse(class_exists('NonExistentClass'));
         self::assertFalse($this->container->has('NonExistentClass'));
@@ -78,32 +80,37 @@ class ContainerTest extends TestCase
         $definitions = [
             ClassWithoutConstructor::class => function () {
                 return new ClassWithEmptyConstructor();
-            }
+            },
         ];
 
         $container = new Container($definitions);
+
         self::assertInstanceOf(
             ClassWithEmptyConstructor::class,
-            $this->container->get(ClassWithoutConstructor::class)
+            $container->get(ClassWithoutConstructor::class),
         );
     }
 
     public function testGetResolvesWithClassWithoutConstructor(): void
     {
         $returned = $this->container->get(ClassWithoutConstructor::class);
+
         self::assertInstanceOf(ClassWithoutConstructor::class, $returned);
     }
 
     public function testGetResolvesWithClassWithEmptyConstructor(): void
     {
         $returned = $this->container->get(ClassWithEmptyConstructor::class);
+
         self::assertInstanceOf(ClassWithEmptyConstructor::class, $returned);
     }
 
     public function testGetThrowsWhenRequestedForNonInstantiable(): void
     {
-        $msg = sprintf('%s is not instantiable.', UserDefinedInterface::class);
-        $this->expectExceptionMessage($msg);
+        $this->expectExceptionMessage(
+            sprintf('[%s] is not instantiable.', UserDefinedInterface::class),
+        );
+
         $this->container->get(UserDefinedInterface::class);
     }
 
@@ -111,44 +118,44 @@ class ContainerTest extends TestCase
     {
         self::assertSame(
             $this->container->get(ClassWithoutConstructor::class),
-            $this->container->get(ClassWithoutConstructor::class)
+            $this->container->get(ClassWithoutConstructor::class),
         );
     }
 
     public function testGetInjectsDefaultBuiltinParamsCorrectly(): void
     {
         $returned = $this->container->get(ConstructorRequiresBuiltinParamsWithDefaults::class);
-        self::assertEquals(1, $returned->integer);
-        self::assertEquals(false, $returned->boolean);
-        self::assertEquals(null, $returned->nullableString);
-        self::assertEquals(100.5, $returned->float);
+
+        self::assertSame(1, $returned->integer);
+        self::assertFalse($returned->boolean);
+        self::assertNull($returned->nullableString);
+        self::assertSame(100.5, $returned->float);
     }
 
     public function testGetThrowsWhenBuiltinArgsHaveNoDefaults(): void
     {
         $className = ConstructorRequiresBuiltinParamWithoutDefault::class;
+
         $this->expectExceptionObject(
             new ContainerException(
-                "Failed to instantiate $className.",
-                0,
-                new ContainerException(
-                    "Unable to resolve $className constructor parameter \$integer of type int (position 1).",
-                    0
-                )
-            )
+                "Unable to resolve $className constructor parameter \$integer of type int (position 1).",
+            ),
         );
+
         $this->container->get($className);
     }
 
     public function testGetInjectsDefaultValueEvenIfArgTypeIsNotSpecified(): void
     {
         $resolved = $this->container->get(ConstructorRequiresArgWithoutTypeButWithDefault::class);
-        self::assertEquals(1, $resolved->arg);
+
+        self::assertSame(1, $resolved->arg);
     }
 
     public function testGetInstantiatesClassDependency(): void
     {
         $resolved = $this->container->get(AWithClassDependencies::class);
+
         self::assertInstanceOf(AWithClassDependencies::class, $resolved);
         self::assertInstanceOf(ClassWithEmptyConstructor::class, $resolved->dep);
     }
@@ -156,56 +163,56 @@ class ContainerTest extends TestCase
     public function testGetInjectsEnumsWhenDefaultIsGiven(): void
     {
         $resolved = $this->container->get(BWithEnumDependencyWithDefault::class);
-        self::assertEquals(UserDefinedEnum::ONE, $resolved->dep);
+
+        self::assertSame(UserDefinedEnum::ONE, $resolved->dep);
     }
 
     public function testGetThrowsWhenConstructorRequiresEnumWithoutDefault(): void
     {
         $class = DWithEnumDependencyWithoutDefault::class;
+
         $this->expectExceptionObject(
-            new ContainerException(
-                "Failed to instantiate $class.",
-                0,
-                new ContainerException(
-                    "Composite\Container\Tests\Fixtures\UserDefinedEnum is not instantiable."
-                )
-            )
+            new ContainerException('[Composite\Container\Tests\Fixtures\UserDefinedEnum] is not instantiable.'),
         );
+
         $this->container->get($class);
     }
 
     public function testGetThrowsOnUnionType(): void
     {
         $className = CWithUnionType::class;
-        $this->expectExceptionObject(
-            new ContainerException(
-                "Failed to instantiate $className.",
-                0,
-                new ContainerException(
-                    "Unable to resolve $className constructor parameter \$dep (position 1):"
-                    . " it has union type Composite\Container\Tests\Fixtures\ClassWithEmptyConstructor"
-                    . "|Composite\Container\Tests\Fixtures\ClassWithoutConstructor."
-                )
-            )
+
+        $unionTypes = implode('|', [
+            ClassWithEmptyConstructor::class,
+            ClassWithoutConstructor::class,
+        ]);
+
+        $message = sprintf(
+            'Unable to resolve %s constructor parameter $%s (position %d). It has union type: [%s]',
+            $className,
+            'dep',
+            1,
+            $unionTypes
         );
+
+        $this->expectExceptionObject(new ContainerException($message));
+
         $this->container->get($className);
     }
 
     public function testDetectsCyclicDependency(): void
     {
-        $this->expectExceptionObject(new ContainerException(
-            'Failed to instantiate Composite\Container\Tests\Fixtures\CyclicDependency',
-            0,
-            new ContainerException(
-                'Cyclic dependency of Composite\Container\Tests\Fixtures\CyclicDependency'
-            )
-        ));
+        $this->expectExceptionObject(
+            new ContainerException('Cyclic dependency of [Composite\Container\Tests\Fixtures\CyclicDependency]'),
+        );
+
         $this->container->get(CyclicDependency::class);
     }
 
     public function testHandlesInjectionOfSameTwiceInSameConstructor(): void
     {
         $result = $this->container->get(ConstructorRequiresSameDependencyTwice::class);
+
         self::assertInstanceOf(ConstructorRequiresSameDependencyTwice::class, $result);
     }
 }
