@@ -134,7 +134,12 @@ class Container implements ContainerInterface
         $constructor = $reflection->getConstructor();
         // No constructor defined or constructor requires no arguments? Just create new instance.
         if (!$constructor || !$constructor->getParameters()) {
-            return new $qn();
+            try {
+                return new $qn();
+            } catch (Throwable $exception) {
+                $message = sprintf('Failed to instantiate %s.', $qn);
+                throw new ContainerException($message, 0, $exception);
+            }
         }
 
         try {

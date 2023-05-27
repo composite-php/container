@@ -14,6 +14,8 @@ use Composite\Container\Tests\Fixtures\ClassWithEmptyConstructor;
 use Composite\Container\Tests\Fixtures\ClassWithoutConstructor;
 use Composite\Container\Tests\Fixtures\ConstructorRequiresBuiltinParamWithoutDefault;
 use Composite\Container\Tests\Fixtures\ConstructorRequiresSameDependencyTwice;
+use Composite\Container\Tests\Fixtures\ConstructorThrowsException;
+use Composite\Container\Tests\Fixtures\ConstructorWithDependenciesThrowsException;
 use Composite\Container\Tests\Fixtures\CWithUnionType;
 use Composite\Container\Tests\Fixtures\CyclicDependency;
 use Composite\Container\Tests\Fixtures\DWithEnumDependencyWithoutDefault;
@@ -21,8 +23,10 @@ use Composite\Container\Tests\Fixtures\UserDefinedEnum;
 use Composite\Container\Tests\Fixtures\UserDefinedInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 use function class_exists;
+use function sprintf;
 
 #[CoversClass(Container::class)]
 class ContainerTest extends TestCase
@@ -216,5 +220,35 @@ class ContainerTest extends TestCase
         $container = new Container();
         $result = $container->get(ConstructorRequiresSameDependencyTwice::class);
         self::assertInstanceOf(ConstructorRequiresSameDependencyTwice::class, $result);
+    }
+
+    /**
+     * @dataProvider providerForTestExceptionByConstructorIsWrappedIntoContainerException
+     * @return void
+     */
+    public function testExceptionByConstructorIsWrappedIntoContainerException(string $qn): void
+    {
+        $container = new Container();
+        $exception = new ContainerException(
+            sprintf('Failed to instantiate %s.', $qn),
+            0,
+            new RuntimeException(
+                'Terrible error!',
+                0
+            )
+        );
+        $this->expectExceptionObject($exception);
+        $container->get($qn);
+    }
+
+    /**
+     * @return iterable<array<class-string>>
+     */
+    public static function providerForTestExceptionByConstructorIsWrappedIntoContainerException(): iterable
+    {
+        return [
+            [ConstructorThrowsException::class],
+            [ConstructorWithDependenciesThrowsException::class]
+        ];
     }
 }
