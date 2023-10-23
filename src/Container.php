@@ -18,6 +18,8 @@ use Throwable;
 
 use function array_key_exists;
 use function array_keys;
+use function array_map;
+use function assert;
 use function class_exists;
 use function implode;
 use function interface_exists;
@@ -122,8 +124,6 @@ class Container implements ContainerInterface
             throw new ContainerException($this->buildExceptionReport($msg));
         }
 
-        $this->beingResolved[$qn] = true;
-
         $reflection = new ReflectionClass($qn);
 
         if (!$reflection->isInstantiable()) {
@@ -142,13 +142,14 @@ class Container implements ContainerInterface
             }
         }
 
+        $this->beingResolved[$qn] = true;
         try {
-            $instance = new $qn(...$this->resolveParams($qn, $constructor));
-            unset($this->beingResolved[$qn]);
-            return $instance;
+            return new $qn(...$this->resolveParams($qn, $constructor));
         } catch (Throwable $exception) {
             $message = sprintf('Failed to instantiate %s.', $qn);
             throw new ContainerException($message, 0, $exception);
+        } finally {
+            unset($this->beingResolved[$qn]);
         }
     }
 
