@@ -18,12 +18,14 @@ use Composite\Container\Tests\Fixtures\ConstructorThrowsException;
 use Composite\Container\Tests\Fixtures\ConstructorWithDependenciesThrowsException;
 use Composite\Container\Tests\Fixtures\CWithUnionType;
 use Composite\Container\Tests\Fixtures\CyclicDependency;
+use Composite\Container\Tests\Fixtures\CyclicTestDependency;
 use Composite\Container\Tests\Fixtures\DWithEnumDependencyWithoutDefault;
 use Composite\Container\Tests\Fixtures\UserDefinedEnum;
 use Composite\Container\Tests\Fixtures\UserDefinedInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use Throwable;
 
 use function class_exists;
 use function sprintf;
@@ -250,5 +252,26 @@ class ContainerTest extends TestCase
             [ConstructorThrowsException::class],
             [ConstructorWithDependenciesThrowsException::class]
         ];
+    }
+
+    public function testFalseRecursive(): void
+    {
+        $container = new Container();
+        try {
+            $container->get(CyclicTestDependency::class);
+        } catch (Throwable $exception) {
+            // Do nothing.
+        }
+
+        $this->expectExceptionObject(new ContainerException(
+            'Failed to instantiate Composite\Container\Tests\Fixtures\CyclicTestDependency',
+            0,
+            new ContainerException(
+                'Failed to instantiate Composite\Container\Tests\Fixtures\ConstructorThrowsException',
+                0,
+                new RuntimeException('Terrible error!', 0)
+            )
+        ));
+        $container->get(CyclicTestDependency::class);
     }
 }
