@@ -9,6 +9,7 @@ use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
 use ReflectionClass;
+use ReflectionException;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionParameter;
@@ -19,10 +20,10 @@ use Throwable;
 use function array_key_exists;
 use function array_keys;
 use function array_map;
-use function assert;
 use function class_exists;
 use function implode;
 use function interface_exists;
+use function is_null;
 use function sprintf;
 
 use const PHP_EOL;
@@ -132,7 +133,7 @@ class Container implements ContainerInterface
         }
 
         $constructor = $reflection->getConstructor();
-        // No constructor defined or constructor requires no arguments? Just create new instance.
+        // No constructor defined or constructor requires no arguments? Create new instance.
         if (!$constructor || !$constructor->getParameters()) {
             try {
                 return new $qn();
@@ -165,38 +166,53 @@ class Container implements ContainerInterface
     private function resolveParams(string $qn, ReflectionMethod $constructor): iterable
     {
         foreach ($constructor->getParameters() as $param) {
-            if ($param->isOptional() && $param->isDefaultValueAvailable()) {
+            if ($param->isDefaultValueAvailable()) {
                 yield $param->getDefaultValue();
                 continue;
             }
 
             $paramType = $param->getType();
-
-            if ($paramType === null) {
-                $this->throwNonResolvableParameterTypeException(
+            if ($paramType instanceof ReflectionUnionType) {
+                $msgFormat = 'Unable to resolve %s constructor parameter $%s (position %d): it has union type %s.';
+                $types = [];
+                foreach ($paramType->getTypes() as $namedType) {
+                    $types[] = $namedType->getName();
+                }
+                $message = sprintf(
+                    $msgFormat,
                     $qn,
-                    $param,
-                    reason:'Null provided as parameter type',
+                    $param->getName(),
+                    $param->getPosition() + 1,
+                    implode('|', $types)
                 );
+                throw new ContainerException($this->buildExceptionReport($message));
             }
 
-            $this->checkForUnionType($qn, $param, $paramType);
-
-            assert($paramType instanceof ReflectionNamedType);
-
-            $this->checkForBuiltinType($qn, $param, $paramType);
-
-            $typeHintedClassName = $paramType->getName();
-
-            if (!class_exists($typeHintedClassName)) {
-                $this->throwNonResolvableParameterTypeException(
+            if (is_null($paramType)) {
+                $msg = sprintf(
+                    'Unable to resolve %s constructor parameter $%s of type %s (position %d).',
                     $qn,
-                    $param,
-                    reason: "The type-hinted class for the type does not exist: $typeHintedClassName",
+                    $param->getName(),
+                    $param->getType() ? (string)$param->getType() : 'unknown',
+                    $param->getPosition() + 1
                 );
+                throw new ContainerException($this->buildExceptionReport($msg));
             }
 
-            $className = (new ReflectionClass($typeHintedClassName))->getName();
+            try {
+                /** @phpstan-ignore-next-line */
+                $paramClass = new ReflectionClass($paramType->getName());
+            } catch (ReflectionException $e) {
+                $msg = sprintf(
+                    'Unable to resolve %s constructor parameter $%s: %s.',
+                    $qn,
+                    $param->getName(),
+                    $e->getMessage()
+                );
+                throw new ContainerException($this->buildExceptionReport($msg), 0, $e);
+            }
+
+            $className = $paramClass->getName();
 
             yield $this->get($className);
 
@@ -204,43 +220,10 @@ class Container implements ContainerInterface
         }
     }
 
-    private function checkForUnionType(
-        string $qn,
-        ReflectionParameter $param,
-        ReflectionType $paramType
-    ): void {
-        if ($paramType instanceof ReflectionUnionType) {
-            $typeNames = array_map(
-                static fn(ReflectionNamedType $type): string => $type->getName(),
-                $paramType->getTypes(),
-            );
-
-            $this->throwNonResolvableParameterTypeException(
-                $qn,
-                $param,
-                reason: 'It has union type:' . implode('|', $typeNames),
-            );
-        }
-    }
-
-    private function checkForBuiltinType(
-        string $qn,
-        ReflectionParameter $param,
-        ReflectionNamedType $paramType
-    ): void {
-        if ($paramType->isBuiltin()) {
-            $this->throwNonResolvableParameterTypeException(
-                $qn,
-                $param,
-                reason: 'A built-in type provided',
-            );
-        }
-    }
-
     /**
      * Since dependency resolution is recursive, it's
-     * important to provide developer with information about
-     * where exactly in resolution stack the problem occurred.
+     * important to provide the user with information about
+     * where exactly in the resolution stack the problem occurred.
      *
      * @param string $reason Exact reason for exception.
      *
@@ -254,25 +237,5 @@ class Container implements ContainerInterface
         }
 
         return $report . $reason;
-    }
-
-    private function throwNonResolvableParameterTypeException(
-        string $qn,
-        ReflectionParameter $param,
-        ?string $reason = null,
-    ): never {
-        $msg = sprintf(
-            'Unable to resolve %s constructor parameter $%s of type %s (position %d).',
-            $qn,
-            $param->getName(),
-            $param->getType() ? (string) $param->getType() : 'unknown',
-            $param->getPosition() + 1,
-        );
-
-        if ($reason !== null) {
-            $msg .= " Reason: $reason";
-        }
-
-        throw new ContainerException($this->buildExceptionReport($msg));
     }
 }

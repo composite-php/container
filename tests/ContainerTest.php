@@ -6,8 +6,10 @@ namespace Composite\Container\Tests;
 
 use Composite\Container\Container;
 use Composite\Container\ContainerException;
+use Composite\Container\NotFoundException;
 use Composite\Container\Tests\Fixtures\AWithClassDependencies;
 use Composite\Container\Tests\Fixtures\BWithEnumDependencyWithDefault;
+use Composite\Container\Tests\Fixtures\ClassWIthBuiltinNonOptional;
 use Composite\Container\Tests\Fixtures\ConstructorRequiresArgWithoutTypeButWithDefault;
 use Composite\Container\Tests\Fixtures\ConstructorRequiresBuiltinParamsWithDefaults;
 use Composite\Container\Tests\Fixtures\ClassWithEmptyConstructor;
@@ -20,6 +22,7 @@ use Composite\Container\Tests\Fixtures\CWithUnionType;
 use Composite\Container\Tests\Fixtures\CyclicDependency;
 use Composite\Container\Tests\Fixtures\CyclicTestDependency;
 use Composite\Container\Tests\Fixtures\DWithEnumDependencyWithoutDefault;
+use Composite\Container\Tests\Fixtures\MyTrait;
 use Composite\Container\Tests\Fixtures\UserDefinedEnum;
 use Composite\Container\Tests\Fixtures\UserDefinedInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -273,5 +276,12 @@ class ContainerTest extends TestCase
             )
         ));
         $container->get(CyclicTestDependency::class);
+    }
+
+    public function testTrait(): void
+    {
+        $container = new Container();
+        $this->expectException(NotFoundException::class);
+        $container->get(MyTrait::class);
     }
 }
